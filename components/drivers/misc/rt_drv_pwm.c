@@ -1,21 +1,7 @@
 /*
- * File      : rt_drv_pwm.c
- * This file is part of RT-Thread RTOS
- * COPYRIGHT (C) 2018, RT-Thread Development Team
+ * Copyright (c) 2006-2018, RT-Thread Development Team
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Change Logs:
  * Date           Author       Notes
@@ -102,21 +88,36 @@ static rt_size_t _pwm_write(rt_device_t dev, rt_off_t pos, const void *buffer, r
     return size;
 }
 
+#ifdef RT_USING_DEVICE_OPS
+static const struct rt_device_ops pwm_device_ops =
+{
+    RT_NULL,
+    RT_NULL,
+    RT_NULL,
+    _pwm_read,
+    _pwm_write,
+    _pwm_control
+};
+#endif /* RT_USING_DEVICE_OPS */
+
 rt_err_t rt_device_pwm_register(struct rt_device_pwm *device, const char *name, const struct rt_pwm_ops *ops, const void *user_data)
 {
     rt_err_t result = RT_EOK;
 
     memset(device, 0, sizeof(struct rt_device_pwm));
 
+#ifdef RT_USING_DEVICE_OPS
+    device->parent.ops = &pwm_device_ops;
+#else
+    device->parent.init = RT_NULL;
+    device->parent.open = RT_NULL;
+    device->parent.close = RT_NULL;
+    device->parent.read  = _pwm_read;
+    device->parent.write = _pwm_write;
+    device->parent.control = _pwm_control;
+#endif /* RT_USING_DEVICE_OPS */
+
     device->parent.type         = RT_Device_Class_Miscellaneous;
-
-    device->parent.init         = RT_NULL;
-    device->parent.open         = RT_NULL;
-    device->parent.close        = RT_NULL;
-    device->parent.read         = _pwm_read;
-    device->parent.write        = _pwm_write;
-    device->parent.control      = _pwm_control;
-
     device->ops                 = ops;
     device->parent.user_data    = (void *)user_data;
 

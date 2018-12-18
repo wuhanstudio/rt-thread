@@ -495,7 +495,7 @@ static void rt_wlan_event_dispatch(struct rt_wlan_device *device, rt_wlan_dev_ev
     {
         user_buff = *buff;
     }
-    /* 事件处理 */
+    /* Event Handle */
     switch (event)
     {
     case RT_WLAN_DEV_EVT_CONNECT:
@@ -737,9 +737,12 @@ rt_err_t rt_wlan_set_mode(const char *dev_name, rt_wlan_mode_t mode)
         RT_WLAN_LOG_E("not find device, set mode failed! name:%s", dev_name);
         return -RT_EIO;
     }
+
+    MGNT_LOCK();
     if (RT_WLAN_DEVICE(device)->mode == mode)
     {
         RT_WLAN_LOG_D("L:%d this device mode is set");
+        MGNT_UNLOCK();
         return RT_EOK;
     }
 
@@ -747,19 +750,21 @@ rt_err_t rt_wlan_set_mode(const char *dev_name, rt_wlan_mode_t mode)
             (RT_WLAN_DEVICE(device)->flags & RT_WLAN_FLAG_AP_ONLY))
     {
         RT_WLAN_LOG_I("this device ap mode only");
+        MGNT_UNLOCK();
         return -RT_ERROR;
     }
     else if ((mode == RT_WLAN_AP) &&
              (RT_WLAN_DEVICE(device)->flags & RT_WLAN_FLAG_STA_ONLY))
     {
         RT_WLAN_LOG_I("this device sta mode only");
+        MGNT_UNLOCK();
         return -RT_ERROR;
     }
+
     /*
      * device == sta  and change to ap,  should deinit
      * device == ap   and change to sta, should deinit
     */
-    MGNT_LOCK();
     if (((mode == RT_WLAN_STATION) && (RT_WLAN_DEVICE(device) == AP_DEVICE())) ||
             ((mode == RT_WLAN_AP) && (RT_WLAN_DEVICE(device) == STA_DEVICE())))
     {
@@ -1315,7 +1320,10 @@ rt_err_t rt_wlan_start_ap_adv(struct rt_wlan_info *info, const char *password)
         return -RT_EIO;
     }
     RT_WLAN_LOG_D("%s is run", __FUNCTION__);
-    password_len = rt_strlen(password);
+    if (password != RT_NULL)
+    {
+        password_len = rt_strlen(password);
+    }
     if (password_len > RT_WLAN_PASSWORD_MAX_LENGTH)
     {
         RT_WLAN_LOG_E("key is to long! len:%d", password_len);
@@ -1353,16 +1361,16 @@ rt_err_t rt_wlan_start_ap_adv(struct rt_wlan_info *info, const char *password)
     return err;
 }
 
-int rt_wlan_ap_is_active(void)
+rt_bool_t rt_wlan_ap_is_active(void)
 {
-    int _active = 0;
+    rt_bool_t _active = RT_FALSE;
 
     if (_ap_is_null())
     {
-        return 0;
+        return RT_FALSE;
     }
 
-    _active = _ap_mgnt.state & RT_WLAN_STATE_ACTIVE ? 1 : 0;
+    _active = _ap_mgnt.state & RT_WLAN_STATE_ACTIVE ? RT_TRUE : RT_FALSE;
     RT_WLAN_LOG_D("%s is run active:%s", __FUNCTION__, _active ? "Active" : "Inactive");
     return _active;
 }
@@ -1627,12 +1635,12 @@ struct rt_wlan_scan_result *rt_wlan_scan_with_info(struct rt_wlan_info *info)
         return &scan_result;
     }
 
-    /* run scna */
+    /* run scan */
     err = rt_wlan_dev_scan(STA_DEVICE(), info);
     if (err != RT_EOK)
     {
         rt_wlan_complete_delete(complete);
-        RT_WLAN_LOG_E("scna sync fail");
+        RT_WLAN_LOG_E("scan sync fail");
         MGNT_UNLOCK();
         return RT_NULL;
     }
@@ -1646,7 +1654,7 @@ struct rt_wlan_scan_result *rt_wlan_scan_with_info(struct rt_wlan_info *info)
     set = 0x1 << RT_WLAN_DEV_EVT_SCAN_DONE;
     if (!(recved & set))
     {
-        RT_WLAN_LOG_E("scna wait timeout!");
+        RT_WLAN_LOG_E("scan wait timeout!");
         MGNT_UNLOCK();
         return &scan_result;
     }
