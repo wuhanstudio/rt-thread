@@ -44,6 +44,28 @@ struct finsh_shell _shell;
 struct finsh_shell *shell;
 static char *finsh_prompt_custom = RT_NULL;
 
+#if defined(_MSC_VER) || (defined(__GNUC__) && defined(__x86_64__))
+struct finsh_syscall* finsh_syscall_next(struct finsh_syscall* call)
+{
+    unsigned int *ptr;
+    ptr = (unsigned int*) (call + 1);
+    while ((*ptr == 0) && ((unsigned int*)ptr < (unsigned int*) _syscall_table_end))
+        ptr ++;
+
+    return (struct finsh_syscall*)ptr;
+}
+
+struct finsh_sysvar* finsh_sysvar_next(struct finsh_sysvar* call)
+{
+    unsigned int *ptr;
+    ptr = (unsigned int*) (call + 1);
+    while ((*ptr == 0) && ((unsigned int*)ptr < (unsigned int*) _sysvar_table_end))
+        ptr ++;
+
+    return (struct finsh_sysvar*)ptr;
+}
+#endif /* defined(_MSC_VER) || (defined(__GNUC__) && defined(__x86_64__)) */
+
 #ifdef RT_USING_HEAP
 int finsh_set_prompt(const char * prompt)
 {
@@ -56,7 +78,7 @@ int finsh_set_prompt(const char * prompt)
     /* strdup */
     if(prompt)
     {
-        finsh_prompt_custom = rt_malloc(strlen(prompt)+1);
+        finsh_prompt_custom = (char *)rt_malloc(strlen(prompt)+1);
         if(finsh_prompt_custom)
         {
             strcpy(finsh_prompt_custom, prompt);
@@ -134,18 +156,18 @@ void finsh_set_prompt_mode(rt_uint32_t prompt_mode)
     shell->prompt_mode = prompt_mode;
 }
 
-static char finsh_getchar(void)
+static int finsh_getchar(void)
 {
 #ifdef RT_USING_POSIX
     return getchar();
 #else
-    char ch;
+    char ch = 0;
 
     RT_ASSERT(shell != RT_NULL);
     while (rt_device_read(shell->device, -1, &ch, 1) != 1)
         rt_sem_take(&shell->rx_sem, RT_WAITING_FOREVER);
 
-    return ch;
+    return (int)ch;
 #endif
 }
 
@@ -279,7 +301,7 @@ const char *finsh_get_password(void)
 
 static void finsh_wait_auth(void)
 {
-    char ch;
+    int ch;
     rt_bool_t input_finish = RT_FALSE;
     char password[FINSH_PASSWORD_MAX] = { 0 };
     rt_size_t cur_pos = 0;
@@ -295,6 +317,10 @@ static void finsh_wait_auth(void)
             {
                 /* read one character from device */
                 ch = finsh_getchar();
+                if (ch < 0)
+                {
+                    continue;
+                }
 
                 if (ch >= ' ' && ch <= '~' && cur_pos < FINSH_PASSWORD_MAX)
                 {
@@ -305,8 +331,8 @@ static void finsh_wait_auth(void)
                 else if (ch == '\b' && cur_pos > 0)
                 {
                     /* backspace */
-                    password[cur_pos] = '\0';
                     cur_pos--;
+                    password[cur_pos] = '\0';
                     rt_kprintf("\b \b");
                 }
                 else if (ch == '\r' || ch == '\n')
@@ -460,7 +486,7 @@ static void shell_push_history(struct finsh_shell *shell)
 
 void finsh_thread_entry(void *parameter)
 {
-    char ch;
+    int ch;
 
     /* normal is echo mode */
 #ifndef FINSH_ECHO_DISABLE_DEFAULT
@@ -503,6 +529,10 @@ void finsh_thread_entry(void *parameter)
     while (1)
     {
         ch = finsh_getchar();
+        if (ch < 0)
+        {
+            continue;
+        }
 
         /*
          * handle control key

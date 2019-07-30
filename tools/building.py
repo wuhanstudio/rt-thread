@@ -105,8 +105,11 @@ class Win32Spawn:
         try:
             proc = subprocess.Popen(cmdline, env=_e, shell=False)
         except Exception as e:
-            print ('Error in calling:\n' + cmdline)
-            print ('Exception: ' + e + ': ' + os.strerror(e.errno))
+            print ('Error in calling command:' + cmdline.split(' ')[0])
+            print ('Exception: ' + os.strerror(e.errno))
+            if (os.strerror(e.errno) == "No such file or directory"):
+                print ("\nPlease check Toolchains PATH setting.\n")
+
             return e.errno
         finally:
             os.environ['PATH'] = old_path
@@ -128,7 +131,7 @@ def GenCconfigFile(env, BuildOptions):
             f = open('cconfig.h', 'r')
             if f:
                 contents = f.read()
-                f.close();
+                f.close()
 
                 prep = PatchedPreProcessor()
                 prep.process_contents(contents)
@@ -158,6 +161,26 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
                       action = 'store_true',
                       default = False,
                       help = 'make distribution and strip useless files')
+    AddOption('--dist-ide',
+                      dest = 'make-dist-ide',
+                      action = 'store_true',
+                      default = False,
+                      help = 'make distribution for RT-Thread Studio IDE')
+    AddOption('--project-path',
+                      dest = 'project-path',
+                      type = 'string',
+                      default = False,
+                      help = 'set dist-ide project output path')
+    AddOption('--project-name',
+                      dest = 'project-name',
+                      type = 'string',
+                      default = False,
+                      help = 'set project name')
+    AddOption('--reset-project-config',
+                      dest = 'reset-project-config',
+                      action = 'store_true',
+                      default = False,
+                      help = 'reset the project configurations to default')
     AddOption('--cscope',
                       dest = 'cscope',
                       action = 'store_true',
@@ -184,7 +207,7 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
     AddOption('--target',
                       dest = 'target',
                       type = 'string',
-                      help = 'set target project: mdk/mdk4/mdk5/iar/vs/vsc/ua/cdk/ses')
+                      help = 'set target project: mdk/mdk4/mdk5/iar/vs/vsc/ua/cdk/ses/makefile/eclipse')
     AddOption('--genconfig',
                 dest = 'genconfig',
                 action = 'store_true',
@@ -225,6 +248,8 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
                 'cb':('keil', 'armcc'),
                 'ua':('gcc', 'gcc'),
                 'cdk':('gcc', 'gcc'),
+                'makefile':('gcc', 'gcc'),
+                'eclipse':('gcc', 'gcc'),
                 'ses' : ('gcc', 'gcc')}
     tgt_name = GetOption('target')
 
@@ -270,6 +295,13 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
         env['LIBLINKSUFFIX'] = '.lib'
         env['LIBDIRPREFIX'] = '--userlibpath '
 
+    elif rtconfig.PLATFORM == 'iar':
+        env['LIBPREFIX'] = ''
+        env['LIBSUFFIX'] = '.a'
+        env['LIBLINKPREFIX'] = ''
+        env['LIBLINKSUFFIX'] = '.a'
+        env['LIBDIRPREFIX'] = '--search '
+
     # patch for win32 spawn
     if env['PLATFORM'] == 'win32':
         win32_spawn = Win32Spawn()
@@ -283,8 +315,8 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
 
     # add program path
     env.PrependENVPath('PATH', rtconfig.EXEC_PATH)
-    # add rtconfig.h path
-    env.Append(CPPPATH = [str(Dir('#').abspath)])
+    # add rtconfig.h/BSP path into Kernel group
+    DefineGroup("Kernel", [], [], CPPPATH=[str(Dir('#').abspath)])
 
     # add library build action
     act = SCons.Action.Action(BuildLibInstallAction, 'Install compiled library... $TARGET')
@@ -345,10 +377,22 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
                 dest = 'pyconfig',
                 action = 'store_true',
                 default = False,
-                help = 'make menuconfig for RT-Thread BSP')
-    if GetOption('pyconfig'):
-        from menuconfig import pyconfig
-        pyconfig(Rtt_Root)
+                help = 'Python GUI menuconfig for RT-Thread BSP')
+    AddOption('--pyconfig-silent',
+                dest = 'pyconfig_silent',
+                action = 'store_true',
+                default = False,
+                help = 'Don`t show pyconfig window')
+
+    if GetOption('pyconfig_silent'):    
+        from menuconfig import guiconfig_silent
+
+        guiconfig_silent(Rtt_Root)
+        exit(0)
+    elif GetOption('pyconfig'):
+        from menuconfig import guiconfig
+
+        guiconfig(Rtt_Root)
         exit(0)
 
     configfn = GetOption('useconfig')
@@ -802,6 +846,15 @@ def GenTargetProject(program = None):
         from ses import SESProject
         SESProject(Env)
 
+    if GetOption('target') == 'makefile':
+        from makefile import TargetMakefile
+        TargetMakefile(Env)
+
+    if GetOption('target') == 'eclipse':
+        from eclipse import TargetEclipse
+        TargetEclipse(Env, GetOption('reset-project-config'), GetOption('project-name'))
+
+
 def EndBuilding(target, program = None):
     import rtconfig
 
@@ -832,6 +885,24 @@ def EndBuilding(target, program = None):
     if GetOption('make-dist-strip') and program != None:
         from mkdist import MkDist_Strip
         MkDist_Strip(program, BSP_ROOT, Rtt_Root, Env)
+        need_exit = True
+    if GetOption('make-dist-ide') and program != None:
+        from mkdist import MkDist
+        project_path = GetOption('project-path')
+        project_name = GetOption('project-name')
+
+        if not isinstance(project_path, str) or len(project_path) == 0 :
+            print("\nwarning : --project-path=your_project_path parameter is required.")
+            print("\nstop!")
+            exit(0)
+
+        if not isinstance(project_name, str) or len(project_name) == 0:
+            print("\nwarning : --project-name=your_project_name parameter is required.")
+            print("\nstop!")
+            exit(0)
+
+        rtt_ide = {'project_path' : project_path, 'project_name' : project_name}
+        MkDist(program, BSP_ROOT, Rtt_Root, Env, rtt_ide)
         need_exit = True
     if GetOption('cscope'):
         from cscope import CscopeDatabase
